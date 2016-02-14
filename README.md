@@ -1,3 +1,5 @@
+# [Live demo](http://waldyrious.net/wiri/)
+
 This repository is a partial clone of Magnus Manske's 
 [Tools from Toolserver](https://bitbucket.org/magnusmanske/magnus-toolserver/),
 which contains [Wiri](https://tools.wmflabs.org/magnus-toolserver/thetalkpage/) and other tools.
