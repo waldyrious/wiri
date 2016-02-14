@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>Talk to the Wiki</title>
+<style>
+span.response {}
+</style>
+
+<div id='loading'><i>Loading...</i></div>
+
+<div id='main' style='display:none'>
+<h1>The Talk Page</h1>
+<div>Talk to <i>Wiri</i>, obviously named after "Wiki" with an "r", and nothing else!<br/>
+Wiri requires a modern browser (Chrome, others to follow) for the speech interface; otherwise, just type your questions.</div>
+<div style='margin-top:10px'>
+<div><a href='#' onclick='$("#examples").toggle();return false'>Show/hide examples</a></div>
+<div id='examples' style='display:none;padding-left:5px;border-left:15px solid #DDDDDD;margin:2px'>
+<div id='examples_list'></div>
+<div><small><i>Tip:</i> Wiri has context-sensitive memory; ask where Darwin died, then ask <a href='#' onclick='runExample("Where is that?");return false'>Where is that?</a>.</small></div>
+</div>
+</div>
+<div style='margin-top:10px'>
+<form id='main_form'>
+<input type="text" style='font-size:14pt' size='50' id="query" name="query" />
+
+<button onclick='record();return false'><img src='https://www.google.com/intl/en/chrome/assets/common/images/content/mic.gif' width='20px' /></button>
+
+<label><input type='checkbox' id='audio_output' /> Read answer aloud</label>
+<label><input type='checkbox' id='verbose' checked /> Chatty</label>
+<!--<label><input type='checkbox' id='log' checked /> Log my queries (anonymously!)</label>-->
+<br/>
+<small><i>Note:</i> Please type names with the first letter of each word in uppercase</small>
+</form>
+</div>
+<div id='conversation' style='margin-top:10px'>
+</div>
+<div id="audio"></div>
+<div id="dummy" style='display:none'></div>
+</div>
+
+<script src="../lib/jquery-1.5.2.min.js"></script>
+
+<script>
+
+var testing = false ;
+var recognition = new webkitSpeechRecognition();
+
+var examples = [
+	'What time is it?' ,
+	'What\'s the cast of the Big Bang Theory?' ,
+	'Where is Cambridge?' ,
+	'What is an onion?' ,
+	'Who was Charles Darwin?' ,
+	'Where was Barack Obama born?' ,
+	'Who was Charles Darwin married to?' ,
+	'Where did Charles Darwin die?' ,
+	'Where is Charles Darwin buried?' ,
+	'Who were the children of Charles Darwin?' ,
+	'Who was the father of Charles Darwin?' ,
+	'Who is the mother of Barack Obama?'
+] ;
+
+var last_entity = {} ;
+
+var rulez = [
+
+	{ 	pattern : /^what time is it$/i , 
+		callback : function ( sq ) {
+			var now = new Date();
+			var response = "The time is " + padZero(now.getHours(),2)+':'+padZero(now.getMinutes(),2)+':'+padZero(now.getSeconds(),2);
+			respond ( response ) ;
+		}
+	} ,
+
+	{ 	pattern : /^who am i$/i , 
+		callback : function ( sq ) {
+			var response = 'You are the user. For now' ;
+			respond ( response ) ;
+		}
+	} ,
+
+	{ 	pattern : /^where was (.+) born$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[0] , prop:19 , reply:'%0 was born in %1' , last:'person' , res_last:'thing' } ) ; }
+	} ,
+
+	{ 	pattern : /^where did (.+) die$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[0] , prop:20 , reply:'%0 died in %1' , last:'person' , res_last:'thing' } ) ; }
+	} ,
+
+	{ 	pattern : /^where is (.+) buried$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[0] , prop:119 , reply:'%0 is buried in %1' , last:'person' , res_last:'thing' } ) ; }
+	} ,
+
+	{ 	pattern : /^who (are|were) the children of (.+)$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[1] , prop:40 , reply:'The children of %0 '+sq[0]+' %1' , res_last:'person' } ) ; }
+	} ,
+
+	{ 	pattern : /^who (is|was) the father of (.+)$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[1] , prop:22 , reply:'The father of %0 '+sq[0]+' %1' , res_last:'person' } ) ; }
+	} ,
+
+	{ 	pattern : /^who (is|was) the mother of (.+)$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[1] , prop:25 , reply:'The mother of %0 '+sq[0]+' %1' , res_last:'person' } ) ; }
+	} ,
+
+	{ 	pattern : /^who (is|was) (.+) married to$/i , 
+		callback : function ( sq ) { replyWithPropsOfArticle ( { query:sq[1] , prop:26 , reply:'%0 '+sq[0]+' spouse of %1' , res_last:'person' } ) ; }
+	} ,
+
+	{ 	pattern : /^what is the cast of (.+)$/i , callback : function ( sq ) { showCast ( sq[0] ) } } ,
+	{ 	pattern : /^who is the cast of (.+)$/i , callback : function ( sq ) { showCast ( sq[0] ) } } ,
+	{ 	pattern : /^who is in the cast of (.+)$/i , callback : function ( sq ) { showCast ( sq[0] ) } } ,
+	{ 	pattern : /^who star{1,2}s in (.+)$/i , callback : function ( sq ) { showCast ( sq[0] ) } } ,
+	{ 	pattern : /^who is star{1,2}ing in (.+)$/i , callback : function ( sq ) { showCast ( sq[0] ) } } ,
+
+	{ 	pattern : /^(who|what) are you$/i , 
+		callback : function ( sq ) {
+			var response = 'I am the Singularity. Now bend over' ;
+			respond ( response ) ;
+		}
+	} ,
+
+	{ 	pattern : /^(where) (is|was) (.+)$/i , 
+		callback : function ( sq ) {
+			if ( sq[2].toLowerCase() == 'waldo' ) {
+				return respond ( "Behind you!" ) ;
+			}
+			var v=verbose;
+			verbose=false; 
+			replyWithPropsOfArticle ( { query:sq[2] , prop:0 , callback:function ( params ) {
+				verbose = v ;
+				replyWithChain ( { q:params.q , p:['P17','P131'] , middle:' is in ' , fail:function () {
+					if (isDisambiguationPage ( params.q ) ) {
+						offerDisambiguationPages ( params.q , sq[0]+' '+sq[1]+' %0?' ) ;
+					} else {
+						return respond ( "Sorry, I don't know where " + getQlink ( params.q ) + " is" ) ;
+					}
+				} } ) ;
+		} } ) }
+	} ,
+	
+	{ 	pattern : /^(who|what) (is|was|are|were) (.+)$/i , 
+		callback : function ( sq ) {
+			var v=verbose; 
+			verbose=false; 
+			var query = sq[2].replace(/^[Aa]n{0,1}\s/,'') ;
+			replyWithPropsOfArticle ( { query:query , prop:0 , callback:function ( params ) {
+				verbose = v ;
+				var response = 'This information does not exist. Yet. You could <a href="//www.wikidata.org/wiki/' + params.q + '" target="_blank">add it</a>...' ;
+
+				if (isDisambiguationPage ( params.q ) ) {
+					return offerDisambiguationPages ( params.q , sq[0]+' '+sq[1]+' %0?' ) ;
+				}
+
+				var chains = [
+					{ p:['P171','P273','P75','P76','P77','P71','P70','P74','P89'] , middle:' has a taxon tree of ' } ,
+					{ p:['P31','P279'] , middle:' '+sq[1]+' a ' }
+				] ;
+			
+				tryMultipleChains ( { q:params.q , chains:chains , desc:params.desc , fail:function () {
+					if ( params.desc !== undefined ) {
+						response = getQlink(params.q) + ' ' + sq[1] + ' ' + a_an(params.desc) + ' ' + params.desc ;
+					}
+					respond ( response ) ;
+				} } ) ;
+			}
+		} ) ; }
+	}
+
+	
+] ;
+
+
+var verbose ;
+var full_response = [] ;
+var entity_cache = {} ;
+var running_chain ;
+
+$(document).ready ( function () {
+	if ( !testing ) $('#audio_output').attr({checked:'checked'}) ;
+	$.each ( examples , function ( k , v ) {
+		var h = "<div><a href='#' onclick='runExample(\"" + v.replace(/'/g,"&#39;") + "\");return false'>" + v + "</a></div>" ;
+		$('#examples_list').append ( h ) ;
+	} ) ;
+	$('#loading').remove() ;
+	$('#main').show() ;
+	$('#query').focus();
+//	if ( testing ) { $('#query').val ( examples[1] ) ; userSaid ( $('#query') ) ; }
+} ) ;
+
+function showCast ( query ) {
+	replyWithPropsOfArticle ( { query:query , prop:161 , reply:'%0 starrs %1' , res_last:'person' } ) ;
+}
+
+function offerDisambiguationPages ( q , query ) {
+	var page = entity_cache[q].sitelinks ;
+	if ( page === undefined || page.enwiki === undefined ) {
+		return ;
+	}
+	page = page.enwiki.title ;
+	$.getJSON ( '//en.wikipedia.org/w/api.php?callback=?' , {
+		action : 'query' ,
+		prop : 'links' ,
+		titles : page ,
+		pllimit : 500 ,
+		plnamespace : 0 ,
+		format : 'json'
+	} , function ( data ) {
+		var h = [] ;
+		$.each ( (data.query.pages||[]) , function ( pageid , page ) {
+			$.each ( (page.links||[]) , function ( k , v ) {
+				h.push ( "<a href='#' onclick='runExample(\"" + query.replace('%0',v.title) + "\");return false'>" + v.title + "</a>" ) ;
+			} ) ;
+		} ) ;
+		h = getQlink(q) + ' has multiple meanings, please pick one: ' + h.join(', ') ;
+		respond ( h ) ;
+	} ) ;
+}
+
+function isDisambiguationPage ( q ) {
+	if ( hasPropertyItem ( q , 'P107' , 'Q4167410' ) ) return true ;
+	return false ;
+}
+
+function hasPropertyItem ( q , p , q2 ) {
+	if ( undefined === entity_cache[q] ) return false ;
+	if ( undefined === entity_cache[q].claims ) return false ;
+	if ( undefined === entity_cache[q].claims[p] ) return false ;
+	var found = false ;
+	$.each ( entity_cache[q].claims[p] , function ( k , v ) {
+		var nid = v.mainsnak.datavalue.value['numeric-id'] ;
+		if ( undefined === nid ) return ;
+		if ( 'Q'+nid != q2 ) return ;
+		found = true ;
+	} ) ;
+	return found ;
+}
+
+function a_an ( s ) {
+	if ( -1 != $.inArray ( s.substr(0,1).toLowerCase() , ['a','e','i','o','u'] ) ) return 'an' ;
+	return 'a' ;
+}
+
+function tryMultipleChains ( o ) {
+	if ( o.chains.length == 0 ) {
+		return o.fail() ;
+	}
+	var chain = o.chains.shift() ;
+	replyWithChain ( { q:o.q , p:chain.p , middle:chain.middle , desc:o.desc , fail:function () {
+		tryMultipleChains ( o ) ;
+	} } ) ;
+}
+
+function replyWithChain ( params ) {
+	followChains ( params.q , { p:params.p , callback:function ( o ) {
+			var chain = getLongestChain ( o.tree , params.q ) ;
+			var response = [] ;
+			$.each ( chain , function ( k2 , v2 ) {
+				if ( v2 == params.q ) return ;
+				response.push ( getQlink ( v2 ) ) ;
+			} ) ;
+			if ( response.length == 0 ) {
+				if ( params.fail !== undefined ) return params.fail () ;
+			} else {
+				response = getQlink ( params.q ) + params.middle.replace(/\ba\s+$/,a_an(response[0])+' ') + response.join ( ', ' ) ;
+			}
+			if ( params.desc != undefined ) {
+				full_response.push ( response ) ;
+				response = "Also: " + params.desc ;
+			}
+			respond ( response ) ;
+		}
+	} ) ;
+}
+
+function getQlink ( q ) {
+	var title = ((entity_cache[q].labels||{en:{value:q}}).en||{value:q}).value ;
+	var ret = "<a href='//www.wikidata.org/wiki/" + q + "' target='_blank'>" + title + "</a>" ;
+	return ret ;
+}
+
+function getLongestChain ( chain , start_q ) {
+	var best_chain = [] ;
+	
+	function followChain ( c , q , cur ) {
+		cur.push ( q ) ;
+		if ( c[q].children.length == 0 ) {
+			if ( cur.length > best_chain.length ) best_chain = $.extend ( true , [] , cur ) ;
+		} else {
+			$.each ( c[q].children , function ( k , v ) {
+				if ( -1 != $.inArray ( v , cur ) ) {
+					if ( cur.length > best_chain.length ) best_chain = $.extend ( true , [] , cur ) ;
+					return ;
+				}
+				followChain ( c , v , cur ) ;
+			} ) ;
+		}
+		cur.pop() ;
+	}
+	
+	followChain ( chain , start_q , [] ) ;
+	return best_chain ;
+}
+
+function followChains ( q , o ) {
+	if ( undefined === o.tree ) {
+		o.tree = {} ;
+		o.hadthat = [] ;
+		running_chain = 0 ;
+	}
+	if ( -1 != $.inArray ( q , o.hadthat ) ) return ; // No circular thingies!
+	o.hadthat.push ( q ) ;
+	running_chain++ ;
+	if ( undefined === o.tree[q] ) o.tree[q] = { parents:[] , children:[] } ;
+	eachEntity ( [ q ] , function ( k , v ) {
+		if ( q != 'Q5' ) { // Special case : human
+			$.each ( (v.claims||[]) , function ( k2 , v2 ) {
+				if ( -1 == $.inArray ( k2 , o.p ) ) return ;
+				$.each ( v2 , function ( k3 , v3 ) {
+					var nid = v3.mainsnak.datavalue.value['numeric-id'] ;
+					if ( undefined === nid ) return ;
+					var q2 = 'Q'+nid ;
+					o.tree[q2] = { parents:[q] , children:[] } ;
+					o.tree[q].children.push ( q2 ) ;
+					followChains ( q2 , o ) ;
+					o.hadthat.pop() ;
+				} ) ;
+			} ) ;
+		}
+		running_chain-- ;
+		if ( running_chain == 0 ) o.callback ( o ) ;
+	} ) ;
+//	if ( running_chain == 0 ) o.callback ( o ) ;
+}
+
+function replyWithPropsOfArticle ( params ) {
+	if ( params.callback === undefined ) params.callback = replyWithPropsOfEntity ;
+	params.query = params.query.ucFirst() ;
+	$.getJSON ( '//www.wikidata.org/w/api.php?callback=?' , {
+		action : 'wbgetentities',
+		titles : params.query ,
+		languages : 'en' ,
+		sites : 'enwiki' ,
+		format : 'json'
+	} , function ( data ) {
+		$.each ( data.entities , function ( k , v ) {
+			if ( k == -1 ) return replyWithPropsOfSearch ( params ) ; // Fallback
+			if ( entity_cache[k] === undefined ) entity_cache[k] = v ; // Prevent re-loading
+			params.q = k ;
+			if ( v.descriptions !== undefined && v.descriptions.en !== undefined ) {
+				var desc = v.descriptions.en.value.replace(/\.+\s*$/,'') ;
+				params.desc = desc ;
+				if ( verbose ) full_response.push ( 'I assume you mean the ' + desc ) ;
+			}
+			params.callback ( params ) ;
+		} ) ;
+	} ) ;
+}
+
+
+function replyWithPropsOfSearch ( params ) {
+	$.getJSON ( '//www.wikidata.org/w/api.php?callback=?' , {
+		action : 'wbsearchentities' ,
+		search : params.query ,
+		language : 'en' ,
+		format : 'json'
+	} , function ( data ) {
+		while ( data.search[0] !== undefined && (data.search[0].description||'').match(/\bdisambiguation\b/i) ) data.search.shift() ;
+		if ( data.search.length == 0 ) {
+			return respond ( 'I do not know about "' + params.query + '". Yet.' ) ;
+		}
+		if ( verbose && data.search.length > 1 && (data.search[0].description||'') != '' ) {
+			full_response.push ( 'I assume you mean the ' + data.search[0].description.replace(/\.+\s*$/,'') ) ;
+		}
+		params.q = data.search[0].id ;
+		params.callback ( params ) ;
+	} ) ;
+}
+
+
+function replyWithPropsOfEntity ( params ) {
+	var titles ;
+	var q = 'Q' + String(params.q).replace(/\D/g,'') ;
+	var p = 'P' + String(params.prop).replace(/\D/g,'') ;
+	
+	if ( params.last !== undefined ) last_entity[params.last] = q ;
+	
+	eachEntity ( [ q ] , function ( k , v ) {
+		if ( undefined === v.claims || undefined === v.claims[p] ) {
+			return respond ( 'This information does not exist. Yet. You could <a href="//www.wikidata.org/wiki/' + q + '" target="_blank">add it</a>...' ) ;
+		}
+		
+		var q2 = [] ;
+		$.each ( v.claims[p] , function ( k2 , v2 ) {
+			var nid = v2.mainsnak.datavalue.value['numeric-id'] ;
+			if ( undefined === nid ) return ;
+			q2.push ( 'Q' + nid ) ;
+		} ) ;
+		
+		var r = [] ;
+		eachEntity ( q2 , function ( k2 , v2 ) {
+			if ( undefined === v2.labels || undefined === v2.labels['en'] ) return ;
+			var s = "<a href='//www.wikidata.org/wiki/" + k2 + "' target='_blank'>" + v2.labels['en'].value + "</a>" ;
+			if ( params.res_last !== undefined ) last_entity[params.res_last] = k2 ;
+			if ( undefined !== v2.descriptions && undefined !== v2.descriptions['en'] ) {
+				if ( verbose && -1 != $.inArray(p*1,[40]) ) s += ', ' + v2.descriptions['en'].value ;
+			}
+			r.push ( s ) ;
+		} , function () {
+			var response = params.reply.replace ( '%1' , r.join('; ') ) ;
+			var orig_link = "<a href='//www.wikidata.org/wiki/" + q + "' target='_blank'>" + params.query + "</a>" ;
+			response = response.replace ( '%0' , orig_link ) ;
+			respond ( response ) ;
+		} ) ;
+		
+	} ) ;
+}
+
+function padZero ( s , digits ) { s = String(s); while ( s.length < digits ) s = '0' + s ; return s }
+
+$('#main_form').submit ( function ( e ) {
+	e.preventDefault() ;
+	return false ;
+} ) ;
+
+$('#query').keypress(function(event) { if (event.keyCode == 13) { userSaid(this) } });
+
+$('#audio_output').change ( function () { $('#query').focus() } ) ;
+
+function userSaid ( o ) {
+	verbose = $("#verbose").is(':checked') ;
+	full_response = [] ;
+	var text = $(o).val() ;
+	var h = "<div style='margin-bottom:8px'><b>You :</b> " + text.ucFirst() + "</div>" ;
+	$('#conversation').prepend ( h ) ;
+	$(o).val('');
+	$('#conversation').prepend ( "<div id='thinking'><i>thinking...</i></div>" ) ;
+	processQuery ( text ) ;
+}
+
+function runExample ( text ) {
+	$('#query').val ( text ) ;
+	userSaid ( $('#query') ) ;
+}
+
+function processQuery ( q ) {
+//	var log = $('#log').attr({checked:'checked'}) ;
+//	if ( testing ) log = false ;
+	log = false ;
+	var foundMatch = false ;
+	var q2 = $.trim(q.replace(/\s+/g,' ')).replace(/\?$/,'') ;
+	q2 = q2.replace ( /^([a-z]+)'s /i , '$1 is ' ) ; // what's => what is
+	var sq = [] ; // Sub-query
+	$.each ( rulez , function ( k , r ) {
+		if ( r.pattern.test ( q2 ) ) {
+			var result = q2.match ( r.pattern ) ;
+			if ( result != null ) {
+				delete result.index ;
+				delete result.input ;
+				result.shift() ;
+				sq = result ;
+			}
+			
+			var abort = false ;
+			$.each ( sq , function ( k2 , v2 ) {
+				if ( -1 != $.inArray ( v2 , ['that','it'] ) ) {
+					if ( last_entity['thing'] !== undefined ) sq[k2] = entity_cache[last_entity['thing']].labels['en'].value ;
+					else { abort=true; respond ( "I can't quite tell what you're referring to" ) ; }
+				} else if ( -1 != $.inArray ( v2 , ['he','she'] ) ) {
+					if ( last_entity['person'] !== undefined ) sq[k2] = entity_cache[last_entity['person']].labels['en'].value ;
+					else { abort=true; respond ( "I can't quite tell who you're referring to" ) ; }
+				}
+			} ) ;
+			if ( abort ) return false ;
+			
+			if ( log ) logQuery ( q , q2 , String(r.pattern) , sq ) ;
+			r.callback ( sq ) ;
+			foundMatch = true ;
+			return false ;
+		}
+	} ) ;
+	
+	if ( foundMatch ) return false ;
+
+	// No idea...
+	if ( log ) logQuery ( q , q2 , "No match found" , [] ) ;
+	respond () ;
+	return false ;
+}
+
+function logQuery ( q_orig , q_parsed , pattern , sq ) {
+	var o = { q_orig:q_orig , q_parsed:q_parsed , pattern:pattern , sq:sq } ;
+	$.getJSON ( '/~magnus/thetalkpage/log.php' , {
+		o : JSON.stringify ( o )
+	} , function ( data ) {
+//		console.log ( data ) ;
+	} ) ;
+}
+
+function respond ( response ) {
+	if ( undefined !== response && response != '' ) {
+		full_response.push ( response ) ;
+	}
+	response = full_response.join ( '. <br/>' ) ;
+	full_response = [] ;
+	if ( response == '' ) response = "I have no idea." ;
+	else if ( !response.match(/[!?]$/) ) response += '.' ;
+	if ( $('#audio_output').is(':checked') ) {
+		$('#dummy').html(response) ;
+		var n = $('#dummy').text() ;
+
+		var msg = new SpeechSynthesisUtterance(n);
+		window.speechSynthesis.speak(msg);		
+		
+//		speak ( n , { pitch:40 , wordgap:2 , speed:150 } ) ;
+	}
+	var h = "<div><b>Wiri :</b> <span class='response'>" + response + "</span></div>" ;
+	$('#thinking').remove() ;
+	$('#conversation').prepend ( h ) ;
+	$('#query').focus();
+}
+
+function eachEntity ( original_entities , callback_per_entity , callback_when_done ) {
+	if ( original_entities.length == 0 ) { // Empty entity list
+		if ( undefined !== callback_when_done ) callback_when_done() ;
+		return ;
+	}
+	var entities = [] ;
+	$.each ( original_entities , function ( k , v ) { entities.push ( v ) } ) ; // Local copy that gets destroyed
+	var running = 0 ;
+	while ( entities.length > 0 ) {
+		running++ ;
+		var p2 = [] ;
+		while ( entities.length > 0 && p2.length < 50 ) {
+			var e = entities.shift() ;
+			if ( undefined !== entity_cache[e] ) {
+				if ( undefined !== callback_per_entity ) callback_per_entity ( e , entity_cache[e] ) ;
+			} else p2.push ( e ) ;
+		}
+		if ( p2.length == 0 ) { // All done from cache
+			running-- ;
+			if ( running == 0 && entities.length == 0 && undefined !== callback_when_done ) callback_when_done() ;
+			return ;
+		}
+		
+		$.getJSON ( '//www.wikidata.org/w/api.php?callback=?' , {
+			action : 'wbgetentities',
+			ids : p2.join('|') ,
+			languages : 'en' ,
+			format : 'json'
+		} , function ( data ) {
+			$.each ( data.entities||[] , function ( k , v ) {
+				entity_cache[k] = v ;
+				if ( undefined !== callback_per_entity ) callback_per_entity ( k , v ) ;
+			} ) ;
+			running-- ;
+			if ( running == 0 && undefined !== callback_when_done ) callback_when_done() ;
+		} ) ;
+		
+	}
+}
+
+String.prototype.ucFirst = function()
+{
+    return this.charAt(0).toUpperCase() + this.substring(1);
+}
+
+
+function record () {
+	$('#query').attr({placeholder:'Speak now!'}) ;
+
+	recognition.onresult = function(event) { 
+	  console.log(event) ;
+	  var q = [] ;
+	  $.each ( (event.results||[]) , function ( k0 , v0 ) {
+	  	$.each ( (v0||[]) , function ( k1 , v1 ) {
+	  		q.push ( v1.transcript ) ;
+	  	} ) ;
+	  } ) ;
+	  
+	  $('#query').val ( q.join(' ') ) ;
+	  userSaid ( $('#query') ) ;
+	  
+	}
+	recognition.start();
+}
+
+
+</script>
