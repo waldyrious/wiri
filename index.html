@@ -36,7 +36,7 @@ title='Click the microphone to speak, or use Ctrl/Cmd-Shift-dot to speak'
 <div id="dummy" style='display:none'></div>
 </div>
 
-<script src="../lib/jquery-1.5.2.min.js"></script>
+<script src="http://code.jquery.com/jquery-2.2.0.min.js"></script>
 <script src="speakClient.js"></script>
 
 <script>
@@ -485,11 +485,7 @@ function processQuery ( q ) {
 
 function logQuery ( q_orig , q_parsed , pattern , sq ) {
 	var o = { q_orig:q_orig , q_parsed:q_parsed , pattern:pattern , sq:sq } ;
-	$.getJSON ( '/~magnus/thetalkpage/log.php' , {
-		o : JSON.stringify ( o )
-	} , function ( data ) {
-//		console.log ( data ) ;
-	} ) ;
+	console.log ( JSON.stringify ( o ) ) ;
 }
 
 function respond ( response ) {
